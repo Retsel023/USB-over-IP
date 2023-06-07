@@ -8,27 +8,35 @@ server_port = 5005  # Update with the server's port number
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_socket.connect((server_ip, server_port))
 
-# Send request to connect to USB devices
-client_socket.send(b"request_devices")
+while True:
+    # Receive the available USB devices from the server
+    device_info_str = client_socket.recv(1024).decode()
+    device_info = eval(device_info_str)  # Convert the string representation back to a list
 
-# Receive USB device information from the server
-device_info_str = client_socket.recv(1024).decode()
-device_info = eval(device_info_str)  # Convert the string representation back to a list
+    # Display available USB devices
+    print("Available USB devices:")
+    for idx, (vendor_id, product_id) in enumerate(device_info):
+        print(f"[{idx}] Vendor ID: {hex(vendor_id)}, Product ID: {hex(product_id)}")
 
-# Display available USB devices
-print("Available USB devices:")
-for idx, (vendor_id, product_id) in enumerate(device_info):
-    print(f"[{idx}] Vendor ID: {hex(vendor_id)}, Product ID: {hex(product_id)}")
+    # Let the user select the USB devices to connect
+    selected_devices = input("Enter the indexes of the devices to connect (comma-separated), or 'q' to quit: ")
 
-# Let the user select the USB devices to connect
-selected_devices = input("Enter the indexes of the devices to connect (comma-separated): ")
-selected_devices = [int(idx) for idx in selected_devices.split(",")]
+    if selected_devices.lower() == 'q':
+        break
 
-# Connect to the selected USB devices
-for idx in selected_devices:
-    vendor_id, product_id = device_info[idx]
-    print(f"Connecting to device - Vendor ID: {hex(vendor_id)}, Product ID: {hex(product_id)}")
-    # Implement the necessary code to connect to the selected USB devices and handle input events
+    selected_devices = [int(idx) for idx in selected_devices.split(",")]
+
+    # Send the selected devices to the server
+    client_socket.send(str(selected_devices).encode())
+
+    # Receive the response from the server
+    response = client_socket.recv(1024).decode()
+
+    # Check if the devices were connected successfully
+    if response == "success":
+        print("Devices connected successfully.")
+    else:
+        print("Failed to connect devices.")
 
 # Close the client socket
 client_socket.close()
