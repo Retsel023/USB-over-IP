@@ -1,72 +1,59 @@
-import socket
-import usb.core
-import usb.util
-import threading
+"""Share physical USB devices using the operating system's USB/IP server."""
 
-# Server information
-server_ip = '192.168.1.50'  # Update with your server's IP address
-server_port = 5005  # Update with the server's port number
+import argparse
 
-# Function to handle client connections
-def handle_client_connection(client_socket, address):
-    # Find available USB devices
-    devices = usb.core.find(find_all=True)
+from usbip_cli import busid, finish
+from usbip_tools import USBIPTools
 
-    # Extract vendor and product IDs of the USB devices
-    device_info = [(device.idVendor, device.idProduct) for device in devices]
 
-    # Send the USB device information to the client
-    client_socket.send(str(device_info).encode())
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("doctor", help="Check native server prerequisites")
+    commands.add_parser("list", help="List local devices and their bus IDs")
+    for command, help_text in (
+        ("bind", "Share one device (may disconnect it from local applications)"),
+        ("unbind", "Stop sharing one device"),
+    ):
+        command_parser = commands.add_parser(command, help=help_text)
+        command_parser.add_argument("--busid", required=True, type=busid)
+    commands.add_parser(
+        "serve", help="Run Linux usbipd in foreground or start the Windows service"
+    )
+    args = parser.parse_args(argv)
 
-    while True:
-        # Receive the selected devices from the client
-        selected_devices_str = client_socket.recv(1024).decode()
-        selected_devices = eval(selected_devices_str)  # Convert the string representation back to a list
+    def execute():
+        tools = USBIPTools()
+        if args.command == "doctor":
+            return tools.doctor("server")
+        if args.command == "list":
+            if tools.system == "Windows":
+                return tools.run("usbipd", ["list"])
+            return tools.run("usbip", ["list", "-l"])
 
-        if not selected_devices:
-            break
+        tools.require_admin()
+        if args.command == "serve":
+            if tools.system == "Windows":
+                result = tools.run("sc", ["start", "usbipd"])
+                if result in (0, 1056):
+                    print("USB/IP service start requested (or already running). "
+                          "Run server.py doctor to check readiness.")
+                    return 0
+                return result
+            tools.load_module("usbip_host")
+            print("Starting usbipd on TCP 3240 in the foreground. "
+                  "Ctrl+C stops this daemon; use unbind to stop sharing devices.",
+                  flush=True)
+            return tools.run("usbipd", [], timeout=None)
 
-        # Connect to the selected USB devices
-        success = True
-        for idx in selected_devices:
-            vendor_id, product_id = device_info[idx]
-            device = usb.core.find(idVendor=vendor_id, idProduct=product_id)
-            if device is not None:
-                try:
-                    # Implement the necessary code to connect to the selected USB devices and handle input events
-                    usb.util.claim_interface(device, 0)  # Claim the interface
-                    # Additional code for device connection and event handling goes here
-                except usb.core.USBError as e:
-                    print(f"Failed to connect to device - Vendor ID: {hex(vendor_id)}, Product ID: {hex(product_id)}")
-                    success = False
-            else:
-                print(f"Device not found - Vendor ID: {hex(vendor_id)}, Product ID: {hex(product_id)}")
-                success = False
+        if tools.system == "Windows":
+            return tools.run("usbipd", [args.command, "--busid", args.busid])
+        if args.command == "bind":
+            tools.load_module("usbip_host")
+        return tools.run("usbip", [args.command, "-b", args.busid])
 
-        if success:
-            client_socket.send(b"success")
-        else:
-            client_socket.send(b"failure")
+    return finish(execute)
 
-    # Close the client socket
-    client_socket.close()
 
-# Create a TCP/IP server socket
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-# Bind the server socket to a specific address and port
-server_socket.bind((server_ip, server_port))
-
-# Listen for incoming connections
-server_socket.listen(1)
-
-print(f"Server is listening on {server_ip}:{server_port}")
-
-while True:
-    # Accept a client connection
-    client_socket, address = server_socket.accept()
-    print(f"Client connected: {address[0]}:{address[1]}")
-
-    # Start a new thread to handle the client connection
-    thread = threading.Thread(target=handle_client_connection, args=(client_socket, address))
-    thread.start()
+if __name__ == "__main__":
+    raise SystemExit(main())
