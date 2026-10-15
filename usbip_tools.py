@@ -41,7 +41,9 @@ class USBIPTools:
             return (
                 "On Debian/Raspberry Pi OS install: sudo apt install usbip usbutils kmod. "
                 "On Ubuntu install: sudo apt install linux-tools-generic "
-                'linux-tools-$(uname -r) usbutils kmod.'
+                'linux-tools-$(uname -r) usbutils kmod. '
+                "On Arch/CachyOS install: sudo pacman -Syu --needed python usbip usbutils kmod "
+                "(also upgrades the system; reboot if the kernel is updated)."
             )
         if tool.removesuffix(".exe").lower() == "usbipd":
             return (
@@ -107,11 +109,14 @@ class USBIPTools:
                 f"Cannot launch {tool!r}; its executable is missing. {self._install_hint(tool)}"
             ) from None
         except subprocess.TimeoutExpired:
+            advice = (
+                " The device may already be attached; run python client.py port "
+                "before retrying."
+                if command[1:2] == ["attach"] else ""
+            )
             raise USBIPError(
-                f"{tool!r} timed out after {timeout} seconds; check the remote host "
-                "and the native tool's configuration. The operation may already "
-                "have changed device state; run python client.py port before "
-                "retrying an attach."
+                f"{tool!r} timed out after {timeout} seconds; check the native tool "
+                f"and connection.{advice}"
             ) from None
         except OSError as error:
             raise USBIPError(
@@ -123,6 +128,12 @@ class USBIPTools:
     ) -> int:
         """Run with inherited streams; return the native tool's exit status."""
         return self._call(tool, args, timeout=timeout).returncode
+
+    def capture(
+        self, tool: str, args: Iterable[str], *, timeout: Optional[float] = 30
+    ) -> subprocess.CompletedProcess:
+        """Capture native output for device discovery without invoking a shell."""
+        return self._call(tool, args, timeout=timeout, capture=True)
 
     def require_admin(self) -> None:
         """Require elevation before changing drivers, modules, or device state."""

@@ -1,20 +1,32 @@
 # USB over IP
 
-Use a USB device plugged into another computer across your LAN, including a
-Raspberry Pi server and a Windows or Linux client. The project uses free,
+Share USB devices between everyday computers on your LAN. Plug a device into
+a spare laptop, desktop, or Raspberry Pi, then use it from another computer
+over the network as though it were plugged in locally. The project uses free,
 open-source USB/IP tools and operating-system drivers to carry real USB
 requests over the network.
 
-`server.py` manages the machine where the USB device is physically plugged in.
-`client.py` attaches that device to the machine where you want to use it. Python
-provides the command-line interface; the installed USB/IP drivers do the USB
-forwarding. The client still needs the normal driver for the USB device, just
-as if you had plugged it in locally.
+The two scripts describe each computer's role:
+
+- **Sharing computer (server):** the computer with the physical USB device
+  plugged into its ports. Run `server.py` here.
+- **Receiving computer (client):** the computer where you want to use that
+  remote USB device. Run `client.py` here.
+
+For example, plug a device into a Pi and run `server.py` on the Pi, then run
+`client.py` on your CachyOS laptop to use it. To share a device plugged into
+the laptop instead, run `server.py` on the laptop. These are software roles;
+the sharing computer can be an ordinary PC or Pi. No dedicated server hardware
+or Windows Server edition is required.
+
+Python provides the command-line interface; the installed USB/IP drivers do
+the USB forwarding. The receiving computer still needs the normal driver for
+the USB device, just as if you had plugged it in locally.
 
 | Role | Linux | Windows |
 | --- | --- | --- |
-| Server: share a physically connected device | Kernel USB/IP host driver and `usbipd` | [usbipd-win](https://github.com/dorssel/usbipd-win) |
-| Client: use a remote device | Kernel virtual host controller and `usbip` | [usbip-win2](https://github.com/vadimgrn/usbip-win2) native Windows client |
+| Sharing computer (server): share a physically connected device | Kernel USB/IP host driver and `usbipd` | [usbipd-win](https://github.com/dorssel/usbipd-win) |
+| Receiving computer (client): use a remote device | Kernel virtual host controller and `usbip` | [usbip-win2](https://github.com/vadimgrn/usbip-win2) native Windows client |
 
 Either server can be used with either client through the USB/IP protocol.
 Specific devices and driver combinations need to be tested on your hardware.
@@ -33,12 +45,65 @@ USB/IP has no built-in authentication or encryption. Use a trusted LAN or VPN,
 and limit the server's firewall rule to the clients that should have access.
 Do not expose port 3240 to the public Internet.
 
+## Start here: guided menu
+
+After installing the packages for your operating system below, open a terminal
+in this repository and start the menu:
+
+```bash
+python3 usbip.py
+```
+
+On Windows, use `py -3 usbip.py` from an Administrator PowerShell.
+
+- On the computer with the USB device plugged in, choose **Share a USB device**,
+  then choose the device by number and confirm sharing. The menu starts the
+  sharing service in the background if it is not already running, and shows
+  this computer's network addresses.
+- On the computer where you want to use it, choose **Use a remote USB device**,
+  then **Find and connect a USB device**. The menu looks for sharing computers
+  on your local network and lists their shared devices with each computer's
+  address. Choose a device by number. You do not need to know its IP address,
+  USB bus ID, or local port number.
+- To disconnect, choose **Disconnect a remote USB device** and select the
+  connected device by number. The menu handles its internal port number.
+- To make the device available locally on the sharing computer again, first
+  disconnect it on the receiving computer, then choose **Stop sharing a USB
+  device** on the sharing computer.
+
+Linux requests your `sudo` password only for an action that changes device or
+service state. Browsing devices and checking prerequisites do not need root.
+You can keep using the menu while sharing multiple devices. Exiting the menu
+leaves the background service and shared devices running; use **Stop sharing**
+when finished. The menu does not configure automatic sharing after a reboot.
+
+Automatic lookup checks TCP port **3240** on nearby private IPv4 LAN addresses,
+then asks responding computers which USB devices they share. A device must
+already be shared on the other computer to appear. Lookup is limited to 512
+addresses in total; on networks larger than a `/24`, it checks the `/24` around
+your local address. Smaller subnets keep their actual boundaries. If interface
+prefixes cannot be read, only this computer's own addresses are checked.
+Choose **Connect by address** (option 5) for a computer on another subnet, a
+VPN, IPv6, or a network that blocks automatic lookup.
+
+After connecting, the menu waits for the device to appear locally before
+confirming success. If registration is still pending, use **Show connected
+remote devices** before attempting another connection.
+
+Starting `python3 server.py` or `python3 client.py` without arguments in a
+terminal opens the corresponding menu directly. The explicit `menu` subcommand
+also opens it. The manual commands below remain available for scripts and
+troubleshooting.
+
 Run the examples from this repository's directory. Replace `192.168.1.50` with
 your server's address, and `1-2` with a bus ID reported by `server.py list`.
 Select a device by bus ID, rather than its vendor/product IDs, so that identical
 devices can be selected individually. Devices are never shared automatically.
 
-## Linux or Raspberry Pi server
+## Linux package installation
+
+Install these packages on each Linux machine, whether it is the server or the
+client. Choose the commands for that machine's distribution.
 
 On Debian or Raspberry Pi OS:
 
@@ -54,10 +119,31 @@ sudo apt update
 sudo apt install python3 linux-tools-generic linux-tools-$(uname -r) usbutils kmod
 ```
 
+On Arch Linux and Arch-based distributions such as **CachyOS**:
+
+```bash
+sudo pacman -Syu --needed python usbip usbutils kmod
+```
+
+The Arch [`usbip` package](https://archlinux.org/packages/extra/x86_64/usbip/)
+provides both `usbip` and `usbipd` for the client and server roles. Python is
+packaged as `python`; the `python3` commands below also work on Arch/CachyOS.
+The `-Syu` command performs a full system upgrade as well as installing these
+packages. If it updates your kernel, reboot before running the module commands
+below so that the running kernel matches the installed modules.
+
 Other distributions need their equivalent USB/IP tools and a kernel built with
 USB/IP host support. The tools must match the running kernel where required by
 the distribution. If `modprobe` reports a missing module, install the matching
 kernel module package or use a kernel with USB/IP enabled.
+
+## Share devices from Linux or a Raspberry Pi
+
+Use this section on the Linux computer where the USB device is physically
+plugged in, including a CachyOS laptop or a Pi running Raspberry Pi OS.
+
+After installing the [Linux packages](#linux-package-installation), load the
+server module and share the device:
 
 ```bash
 sudo modprobe usbip_host
@@ -74,6 +160,10 @@ device over to USB/IP, disconnecting it from local use; do not bind the only
 keyboard, a network adapter providing your connection, or a mounted disk you
 are using.
 
+For background sharing, the guided menu uses `server.py start`, which starts
+Linux `usbipd` in its [native daemon mode](https://man.archlinux.org/man/usbipd.8.en).
+The `serve` command remains available when you want foreground diagnostic logs.
+
 To stop sharing, first detach on the client, then use another server terminal:
 
 ```bash
@@ -86,7 +176,10 @@ replugging the device or rebinding its native driver before it works locally
 again. Repeat the bind step after a server reboot or device reconnection as
 needed; bus IDs can change.
 
-## Windows server
+## Share devices from a Windows PC
+
+Use this section if the USB device is plugged into a Windows laptop or desktop.
+Here, "server" means that the PC shares the device with another computer.
 
 Install [usbipd-win's official release](https://github.com/dorssel/usbipd-win/releases/latest)
 for your Windows version and architecture. It supports Windows 10 or Windows
@@ -124,10 +217,14 @@ the client:
 py -3 server.py unbind --busid 1-2
 ```
 
-## Linux client
+## Use remote devices on Linux
 
-Install the Linux packages described above on the client as well. Its kernel
-needs the USB/IP virtual host controller module:
+Use this section on the Linux computer that will use the remote USB device,
+such as your CachyOS laptop when the device is plugged into a Pi.
+
+Install the [Linux packages](#linux-package-installation) for your client's
+distribution, including the `pacman` command for Arch/CachyOS. Its kernel needs
+the USB/IP virtual host controller module:
 
 ```bash
 sudo modprobe vhci_hcd
@@ -145,7 +242,11 @@ The device should appear to Linux as a locally attached USB device. Check with
 sudo python3 client.py detach --port 0
 ```
 
-## Native Windows client
+This local port is assigned when the device is attached; it is different from
+the USB bus ID on the sharing computer. The guided menu lists connected
+devices by name and finds this port for you.
+
+## Use remote devices on Windows
 
 Install a **signed driver release, version 0.9.8.1 or newer**, of
 [usbip-win2](https://github.com/vadimgrn/usbip-win2/releases), selecting the
@@ -155,8 +256,8 @@ installation instructions and restore-point guidance. Use Microsoft's normal
 driver signature verification; no test-signing mode is required for a signed
 release.
 
-The Windows server package `usbipd-win` does not provide this native client
-driver. Its WSL attachment command makes a device available inside WSL; use
+The Windows device-sharing package `usbipd-win` does not provide this native
+client driver. Its WSL attachment command makes a device available inside WSL; use
 `usbip-win2` to make it available to ordinary Windows applications.
 
 Open **Administrator PowerShell** in this repository:
