@@ -1,42 +1,50 @@
-import socket
+"""Attach remote USB devices using Linux USB/IP or native Windows usbip-win2."""
 
-# Server information
-server_ip = '192.168.1.50'  # Update with your server's IP address
-server_port = 5005  # Update with the server's port number
+import argparse
 
-# Create a TCP/IP client
-client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client_socket.connect((server_ip, server_port))
+from usbip_cli import busid, finish, host, port
+from usbip_tools import USBIPError, USBIPTools
 
-while True:
-    # Receive the available USB devices from the server
-    device_info_str = client_socket.recv(1024).decode()
-    device_info = eval(device_info_str)  # Convert the string representation back to a list
 
-    # Display available USB devices
-    print("Available USB devices:")
-    for idx, (vendor_id, product_id) in enumerate(device_info):
-        print(f"[{idx}] Vendor ID: {hex(vendor_id)}, Product ID: {hex(product_id)}")
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("doctor", help="Check native client prerequisites")
+    listing = commands.add_parser("list", help="List devices exported by a server")
+    listing.add_argument("--host", required=True, type=host)
+    attach = commands.add_parser("attach", help="Attach a device to this computer")
+    attach.add_argument("--host", required=True, type=host)
+    attach.add_argument("--busid", required=True, type=busid)
+    detach = commands.add_parser("detach", help="Detach an imported client port")
+    detach.add_argument("--port", required=True, type=port)
+    commands.add_parser("port", help="Show imported devices and client port numbers")
+    args = parser.parse_args(argv)
 
-    # Let the user select the USB devices to connect
-    selected_devices = input("Enter the indexes of the devices to connect (comma-separated), or 'q' to quit: ")
+    def execute():
+        tools = USBIPTools()
+        if args.command == "doctor":
+            return tools.doctor("client")
+        if args.command == "list":
+            return tools.run("usbip", ["list", "-r", args.host])
+        if args.command == "port":
+            return tools.run("usbip", ["port"])
 
-    if selected_devices.lower() == 'q':
-        break
+        if args.command == "detach" and tools.system == "Windows" and args.port == 0:
+            raise USBIPError("Windows client ports start at 1. "
+                             "Run client.py port to find the imported port.")
+        tools.require_admin()
+        if args.command == "detach":
+            return tools.run("usbip", ["detach", "-p", str(args.port)])
+        if tools.system == "Linux":
+            tools.load_module("vhci_hcd")
+        arguments = ["attach", "-r", args.host, "-b", args.busid]
+        if tools.system == "Windows":
+            # Avoid kernel background retries when the initial attachment fails.
+            arguments.append("--once")
+        return tools.run("usbip", arguments)
 
-    selected_devices = [int(idx) for idx in selected_devices.split(",")]
+    return finish(execute)
 
-    # Send the selected devices to the server
-    client_socket.send(str(selected_devices).encode())
 
-    # Receive the response from the server
-    response = client_socket.recv(1024).decode()
-
-    # Check if the devices were connected successfully
-    if response == "success":
-        print("Devices connected successfully.")
-    else:
-        print("Failed to connect devices.")
-
-# Close the client socket
-client_socket.close()
+if __name__ == "__main__":
+    raise SystemExit(main())
